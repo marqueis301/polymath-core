@@ -4,7 +4,7 @@ const Web3 = require('web3');
 if (typeof web3 !== 'undefined') {
     web3 = new Web3(web3.currentProvider);
 } else {
-    web3 = new Web3(new Web3.providers.HttpProvider("http://localhost:8545"));
+    web3 = new Web3(new Web3.providers.HttpProvider('https://kovan.infura.io/'));
 }
 
 let _polymathRegistry;
@@ -23,7 +23,7 @@ function getPolymathRegistryAddress(networkId) {
       result = JSON.parse(require('fs').readFileSync('./build/contracts/PolymathRegistry.json').toString()).networks[networkId].address;
       break;
     case 42: // KOVAN
-      result = "0x0879dece79f0b7749e2698d377049f5490a06c71";
+      result = "0x464ed7f455456254f1803bf7f0f3fad991d0feff";
       break;
   }
 
@@ -31,26 +31,26 @@ function getPolymathRegistryAddress(networkId) {
 }
 
 async function getPolymathRegistry() {
-  if (typeof _polymathRegistry === 'undefined') { 
+  if (typeof _polymathRegistry === 'undefined') {
     let networkId = await web3.eth.net.getId();
     let polymathRegistryAddress = getPolymathRegistryAddress(networkId);
     let polymathRegistryAbi = abis.polymathRegistry();
     _polymathRegistry = new web3.eth.Contract(polymathRegistryAbi, polymathRegistryAddress);
     _polymathRegistry.setProvider(web3.currentProvider);
   }
-  
+
   return _polymathRegistry;
 }
 
 async function getModuleRegistry() {
-  if (typeof _moduleRegistry === 'undefined') { 
+  if (typeof _moduleRegistry === 'undefined') {
     let polymathRegistry = await getPolymathRegistry();
     let moduleRegistryAddress = await polymathRegistry.methods.getAddress("ModuleRegistry").call();
     let moduleRegistryAbi = abis.moduleRegistryAbi();
     _moduleRegistry = new web3.eth.Contract(moduleRegistryAbi, moduleRegistryAddress);
     _moduleRegistry.setProvider(web3.currentProvider);
   }
-  
+
   return _moduleRegistry;
 }
 
@@ -89,7 +89,7 @@ module.exports = {
     if (networkId == 1)
       throw new Error("Not implemented");
     else if (networkId == 42)
-      return "0xd4eb00b4e222ae13b657edb3e29e1d2df090c1d3"; // Updated to poly_oracle deployment
+      return "0x7a1f3e8e58a1165ed50cc3ee308a4048c378d8d7"; // Updated to poly_oracle deployment
     else
       return JSON.parse(require('fs').readFileSync('./build/contracts/USDTieredSTOFactory.json').toString()).networks[networkId].address;
   },
@@ -108,7 +108,7 @@ module.exports = {
       return "0x6950096964b7adae34d5a3d1792fe73afbe9ddbc";
     else if (networkId == 42)
       return "0x9d8778fc5b4d7b97a74dcfee6661d14709cf5180";
-    else 
+    else
       return JSON.parse(require('fs').readFileSync('./build/contracts/ERC20DividendCheckpointFactory.json').toString()).networks[networkId].address;
   }
 };

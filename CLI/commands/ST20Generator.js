@@ -6,6 +6,7 @@ const Web3 = require('web3');
 var contracts = require('./helpers/contract_addresses');
 var abis = require('./helpers/contract_abis');
 var common = require('./common/common_functions');
+const Tx = require('ethereumjs-tx');
 
 let tickerRegistryAddress;
 let securityTokenRegistryAddress;
@@ -16,7 +17,7 @@ if (typeof web3 !== 'undefined') {
   web3 = new Web3(web3.currentProvider);
 } else {
   // set the provider you want from Web3.providers
-  web3 = new Web3(new Web3.providers.HttpProvider("http://localhost:8545"));
+  web3 = new Web3(new Web3.providers.HttpProvider('https://kovan.infura.io/'));
 }
 
 ///////////////////
@@ -43,6 +44,7 @@ let usdTieredSTOFactory;
 // App flow
 let accounts;
 let Issuer;
+let IssuerAccount;
 let defaultGasPrice;
 let _DEBUG = false;
 let _tokenConfig;
@@ -50,8 +52,12 @@ let _mintingConfig;
 let _stoConfig;
 
 async function executeApp(tokenConfig, mintingConfig, stoConfig) {
-  accounts = await web3.eth.getAccounts();
-  Issuer = accounts[0];
+  //accounts = await web3.eth.getAccounts();
+  //Issuer = accounts[0];
+  const privKey = require('fs').readFileSync('./privKey').toString();
+  IssuerAccount = await web3.eth.accounts.privateKeyToAccount("0x"+privKey);
+  Issuer = IssuerAccount.address;
+
   defaultGasPrice = common.getGasPrice(await web3.eth.net.getId());
 
   _tokenConfig = tokenConfig;
@@ -65,7 +71,7 @@ async function executeApp(tokenConfig, mintingConfig, stoConfig) {
   console.log("Welcome to the Command-Line ST-20 Generator.");
   console.log("********************************************");
   console.log("The following script will create a new ST-20 according to the parameters you enter.");
-  
+
   if(_DEBUG){
     console.log('\x1b[31m%s\x1b[0m',"Warning: Debugging is activated. Start and End dates will be adjusted for easier testing.");
   }
@@ -89,7 +95,7 @@ async function setup(){
     let tickerRegistryABI = abis.tickerRegistry();
     tickerRegistry = new web3.eth.Contract(tickerRegistryABI, tickerRegistryAddress);
     tickerRegistry.setProvider(web3.currentProvider);
-    
+
     securityTokenRegistryAddress = await contracts.securityTokenRegistry();
     let securityTokenRegistryABI = abis.securityTokenRegistry();
     securityTokenRegistry = new web3.eth.Contract(securityTokenRegistryABI, securityTokenRegistryAddress);
@@ -125,11 +131,11 @@ async function step_ticker_reg(){
 
   while (!available) {
     console.log(chalk.green(`\nRegistering the new token symbol requires 250 POLY & deducted from '${Issuer}', Current balance is ${(await currentBalance(Issuer))} POLY\n`));
-    
+
     if (typeof _tokenConfig !== 'undefined' && _tokenConfig.hasOwnProperty('symbol')) {
       tokenSymbol = _tokenConfig.symbol;
     } else {
-      tokenSymbol = readlineSync.question('Enter the symbol for your new token: '); 
+      tokenSymbol = readlineSync.question('Enter the symbol for your new token: ');
     }
 
     await tickerRegistry.methods.getDetails(tokenSymbol).call({from: Issuer}, function(error, result){
@@ -149,21 +155,24 @@ async function step_ticker_reg(){
     await step_approval(tickerRegistryAddress, regFee);
     let registerTickerAction = tickerRegistry.methods.registerTicker(Issuer,tokenSymbol,"",web3.utils.asciiToHex(""));
     let GAS = await common.estimateGas(registerTickerAction, Issuer, 1.2);
-    await registerTickerAction.send({ from: Issuer, gas: GAS, gasPrice: defaultGasPrice})
-    .on('transactionHash', function(hash){
-      console.log(`
-        Congrats! Your Ticker Registration tx populated successfully
-        Your transaction is being processed. Please wait...
-        TxHash: ${hash}\n`
-      );
-    })
-    .on('receipt', function(receipt){
-      console.log(`
-        Congratulations! The transaction was successfully completed.
-        Review it on Etherscan.
-        TxHash: ${receipt.transactionHash}\n`
-      );
-    })
+
+    await localExec(IssuerAccount, tickerRegistry._address, registerTickerAction.encodeABI(), GAS, defaultGasPrice);
+
+    // await registerTickerAction.send({ from: Issuer, gas: GAS, gasPrice: defaultGasPrice})
+    // .on('transactionHash', function(hash){
+    //   console.log(`
+    //     Congrats! Your Ticker Registration tx populated successfully
+    //     Your transaction is being processed. Please wait...
+    //     TxHash: ${hash}\n`
+    //   );
+    // })
+    // .on('receipt', function(receipt){
+    //   console.log(`
+    //     Congratulations! The transaction was successfully completed.
+    //     Review it on Etherscan.
+    //     TxHash: ${receipt.transactionHash}\n`
+    //   );
+    // })
   }
 }
 
@@ -177,7 +186,9 @@ async function step_approval(spender, fee) {
     } else {
       let approveAction = polyToken.methods.approve(spender, web3.utils.toWei(fee.toString(), "ether"));
       let GAS = await common.estimateGas(approveAction, Issuer, 1.2);
-      await approveAction.send({from: Issuer, gas: GAS, gasPrice: defaultGasPrice })
+      //await approveAction.send({from: Issuer, gas: GAS, gasPrice: defaultGasPrice })
+      await localExec(IssuerAccount, polyToken._address, approveAction.encodeABI(), GAS, defaultGasPrice);
+
     }
   } else {
       let requiredBalance = parseInt(requiredAmount) - parseInt(polyBalance);
@@ -200,17 +211,17 @@ async function step_token_deploy(){
     console.log(chalk.green(`Current balance in POLY is ${(await currentBalance(Issuer))}`));
     console.log("\n");
     console.log('\x1b[34m%s\x1b[0m',"Token Creation - Token Deployment");
-    
+
     if (typeof _tokenConfig !== 'undefined' && _tokenConfig.hasOwnProperty('name')) {
       tokenName = _tokenConfig.name;
     } else {
       tokenName = readlineSync.question('Enter the name for your new token: ');
     }
     if (tokenName == "") tokenName = 'default';
-    
+
     console.log("\n");
     console.log('\x1b[34m%s\x1b[0m',"Select the Token divisibility type");
-    
+
     let divisibility;
     if (typeof _tokenConfig !== 'undefined' && _tokenConfig.hasOwnProperty('divisible')) {
       divisibility = _tokenConfig.divisible;
@@ -225,24 +236,12 @@ async function step_token_deploy(){
     await step_approval(securityTokenRegistryAddress, regFee);
     let generateSecurityTokenAction = securityTokenRegistry.methods.generateSecurityToken(tokenName, tokenSymbol, web3.utils.fromAscii(tokenDetails), divisibility);
     let GAS = await common.estimateGas(generateSecurityTokenAction, Issuer, 1.2);
-    await generateSecurityTokenAction.send({ from: Issuer, gas: GAS, gasPrice: defaultGasPrice})
-    .on('transactionHash', function(hash){
-      console.log(`
-        Your transaction is being processed. Please wait...
-        TxHash: ${hash}\n`
-      );
-    })
-    .on('receipt', function(receipt){
-      console.log(`
-        Congratulations! The transaction was successfully completed.
-        Deployed Token at address: ${receipt.events.LogNewSecurityToken.returnValues._securityTokenAddress}
-        Review it on Etherscan.
-        TxHash: ${receipt.transactionHash}\n`
-      );
-      let securityTokenABI = abis.securityToken();
-      securityToken = new web3.eth.Contract(securityTokenABI, receipt.events.LogNewSecurityToken.returnValues._securityTokenAddress);
-    })
-    .on('error', console.error);
+    await localExec(IssuerAccount, securityTokenRegistry._address, generateSecurityTokenAction.encodeABI(), GAS, defaultGasPrice);
+
+    let securityTokenABI = abis.securityToken();
+    let tokenAddress = await securityTokenRegistry.methods.getSecurityTokenAddress(tokenSymbol).call({from: Issuer});
+
+    securityToken = new web3.eth.Contract(securityTokenABI, tokenAddress);
   }
 }
 
@@ -264,7 +263,7 @@ async function step_Wallet_Issuance(){
       console.log('\x1b[34m%s\x1b[0m',"Token Creation - Token Minting for Issuer");
 
       console.log("Before setting up the STO, you can mint any amount of tokens that will remain under your control or you can trasfer to affiliates");
-      
+
       let multimint;
       if (typeof _mintingConfig !== 'undefined' && _mintingConfig.hasOwnProperty('multimint')) {
         multimint = _mintingConfig.multimint;
@@ -301,20 +300,7 @@ async function step_Wallet_Issuance(){
         generalTransferManager = new web3.eth.Contract(generalTransferManagerABI,generalTransferManagerAddress);
         let modifyWhitelistAction = generalTransferManager.methods.modifyWhitelist(mintWallet,Math.floor(Date.now()/1000),Math.floor(Date.now()/1000),Math.floor(Date.now()/1000 + 31536000), canBuyFromSTO);
         let GAS = await common.estimateGas(modifyWhitelistAction, Issuer, 1.5);
-        await modifyWhitelistAction.send({ from: Issuer, gas: GAS, gasPrice:defaultGasPrice})
-        .on('transactionHash', function(hash){
-          console.log(`
-            Adding wallet to whitelist. Please wait...
-            TxHash: ${hash}\n`
-          );
-        })
-        .on('receipt', function(receipt){
-          console.log(`
-            Congratulations! The transaction was successfully completed.
-            Review it on Etherscan.
-            TxHash: ${receipt.transactionHash}\n`
-          );
-        })
+        await localExec(IssuerAccount, generalTransferManager._address, modifyWhitelistAction.encodeABI(), GAS, defaultGasPrice);
 
         // Mint tokens
         if (typeof _mintingConfig !== 'undefined' && _mintingConfig.hasOwnProperty('singleMint') && _mintingConfig.singleMint.hasOwnProperty('tokenAmount')) {
@@ -323,23 +309,12 @@ async function step_Wallet_Issuance(){
           issuerTokens = readlineSync.question('How many tokens do you plan to mint for the wallet you entered? (500.000): ');
         }
         if (issuerTokens == "") issuerTokens = '500000';
-        
+
         let mintAction = securityToken.methods.mint(mintWallet, web3.utils.toWei(issuerTokens,"ether"));
         GAS = await common.estimateGas(mintAction, Issuer, 1.2);
-        await mintAction.send({ from: Issuer, gas: GAS, gasPrice:defaultGasPrice})
-        .on('transactionHash', function(hash){
-          console.log(`
-            Minting tokens. Please wait...
-            TxHash: ${hash}\n`
-          );
-        })
-        .on('receipt', function(receipt){
-          console.log(`
-            Congratulations! The transaction was successfully completed.
-            Review it on Etherscan.
-            TxHash: ${receipt.transactionHash}\n`
-          );
-        })
+        await localExec(IssuerAccount, securityToken._address, mintAction.encodeABI(), GAS, defaultGasPrice);
+
+
       }
     }
   }
@@ -467,7 +442,7 @@ async function cappedSTO_launch() {
     raiseType = readlineSync.question('Enter' + chalk.green(` P `) + 'for POLY raise or leave empty for Ether raise (E):');
     if (raiseType.toUpperCase() == 'P' ) {
       raiseType = 1;
-    } else { 
+    } else {
       raiseType = 0;
     }
   }
@@ -719,7 +694,7 @@ function tiersConfigUSDTieredSTO(polyRaise) {
         defaultInput: defaultRatePerTier[i]
       }));
     }
-    
+
     let isTPTDPDefined = (typeof _stoConfig !== 'undefined' && _stoConfig.hasOwnProperty('discountedTokensPerTiers') && i < _stoConfig.discountedTokensPerTiers.length); //If it's defined by config file
     let isRPTDPDefined = (typeof _stoConfig !== 'undefined' && _stoConfig.hasOwnProperty('discountedRatePerTiers') && i < _stoConfig.discountedRatePerTiers.length); //If it's defined by config file
     //If funds can be raised in POLY and discounts are defined in config file or are choosen by user
@@ -735,7 +710,7 @@ function tiersConfigUSDTieredSTO(polyRaise) {
           defaultInput: defaultTokensPerTierDiscountPoly[i]
         }));
       }
-      
+
       if (isRPTDPDefined) {
         tiers.ratePerTierDiscountPoly[i] = web3.utils.toWei(_stoConfig.discountedRatePerTiers[i].toString());
       } else {
@@ -898,43 +873,17 @@ async function usdTieredSTO_launch() {
     } else {
       let transferAction = polyToken.methods.transfer(securityToken._address, new BigNumber(transferAmount));
       let GAS = await common.estimateGas(transferAction, Issuer, 1.5);
-      await transferAction.send({from: Issuer, gas: GAS, gasPrice: defaultGasPrice})
-      .on('transactionHash', function(hash) {
-        console.log(`
-          Transfer ${(new BigNumber(transferAmount).dividedBy(new BigNumber(10).pow(18))).toNumber()} POLY to ${tokenSymbol} security token
-          Your transaction is being processed. Please wait...
-          TxHash: ${hash}\n`
-        );
-      })
-      .on('receipt', function(receipt){
-        console.log(`
-          Congratulations! The transaction was successfully completed.
-          Number of POLY sent: ${(new BigNumber(receipt.events.Transfer.returnValues._value).dividedBy(new BigNumber(10).pow(18))).toNumber()}
-          Review it on Etherscan.
-          TxHash: ${receipt.transactionHash}
-          gasUsed: ${receipt.gasUsed}\n`
-        );
-      })
+      await localExec(IssuerAccount, polyToken._address, transferAction.encodeABI(), GAS, defaultGasPrice);
+
+
     }
   }
   let addModuleAction = securityToken.methods.addModule(usdTieredSTOFactoryAddress, bytesSTO, new BigNumber(stoFee).times(new BigNumber(10).pow(18)), 0);
   let GAS = await common.estimateGas(addModuleAction, Issuer, 1.2);
-  await securityToken.methods.addModule(usdTieredSTOFactoryAddress, bytesSTO, new BigNumber(stoFee).times(new BigNumber(10).pow(18)), 0).send({from: Issuer, gas: GAS, gasPrice:defaultGasPrice})
-  .on('transactionHash', function(hash){
-    console.log(`
-      Your transaction is being processed. Please wait...
-      TxHash: ${hash}\n`
-    );
-  })
-  .on('receipt', function(receipt){
-      STO_Address = receipt.events.LogModuleAdded.returnValues._module
-    console.log(`
-      Congratulations! The transaction was successfully completed.
-      STO deployed at address: ${STO_Address}
-      Review it on Etherscan.
-      TxHash: ${receipt.transactionHash}\n`
-    );
-  })
+  await localExec(IssuerAccount, securityToken._address, addModuleAction.encodeABI(), GAS, defaultGasPrice);
+
+  //STO_Address = receipt.events.LogModuleAdded.returnValues._module
+
 
   let usdTieredSTOABI = abis.usdTieredSTO();
   currentSTO = new web3.eth.Contract(usdTieredSTOABI,STO_Address);
@@ -1145,7 +1094,7 @@ async function usdTieredSTO_configure() {
           let reserveWallet = await currentSTO.methods.reserveWallet().call({from: Issuer});
           let isVerified = await generalTransferManager.methods.verifyTransfer(STO_Address, reserveWallet).call({from: Issuer});
           if (isVerified) {
-            if (readlineSync.keyInYNStrict()) { 
+            if (readlineSync.keyInYNStrict()) {
               let finalizeAction = currentSTO.methods.finalize();
               let GAS = await common.estimateGas(finalizeAction, Issuer, 1.2);
               await finalizeAction.send({from: Issuer, gas: GAS, gasPrice: defaultGasPrice})
@@ -1351,6 +1300,35 @@ async function currentBalance(from) {
     let balanceInPoly = new BigNumber(balance).dividedBy(new BigNumber(10).pow(18));
     return balanceInPoly;
 }
+
+async function localExec(from, to, abi, gas, gasPrice) {
+    let parameter = {
+        from: from.address,
+        to: to,
+        data: abi,
+        gasLimit: gas,
+        gasPrice: gasPrice
+    };
+    parameter.nonce = await web3.eth.getTransactionCount(from.address);
+    const transaction = new Tx(parameter);
+    transaction.sign(Buffer.from(from.privateKey.replace('0x', ''), 'hex'));
+    await web3.eth.sendSignedTransaction('0x' + transaction.serialize().toString('hex'))
+    .on('transactionHash', function(hash) {
+        console.log(`
+        Your transaction is being processed. Please wait...
+        TxHash: ${hash}\n`
+      );
+    })
+    .on('receipt', function(receipt){
+      console.log(`
+        Congratulations! The transaction was successfully completed.
+        Review it on Etherscan.
+        TxHash: ${receipt.transactionHash}\n`
+      );
+    })
+    //.on('error', console.error);
+}
+
 
 module.exports = {
   executeApp: async function(tokenConfig, mintingConfig, stoConfig) {

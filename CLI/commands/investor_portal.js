@@ -10,7 +10,7 @@ if (typeof web3 !== 'undefined') {
   web3 = new Web3(web3.currentProvider);
 } else {
   // set the provider you want from Web3.providers
-  web3 = new Web3(new Web3.providers.HttpProvider("http://localhost:8545"));
+  web3 = new Web3(new Web3.providers.HttpProvider('https://kovan.infura.io/'));
 }
 
 let defaultGasPrice;
@@ -46,9 +46,11 @@ let displayCanBuy;
 async function executeApp(investor, symbol, currency, amount) {
     // Init user accounts
     let accounts = await web3.eth.getAccounts();
-    Issuer = accounts[0];
+    const privKey = require('fs').readFileSync('./privKey').toString();
+    IssuerAccount = await web3.eth.accounts.privateKeyToAccount("0x"+privKey);
+    Issuer = IssuerAccount.address;
     defaultGasPrice = common.getGasPrice(await web3.eth.net.getId());
-    
+
     await setup();
 
     common.logAsciiBull();
@@ -111,7 +113,7 @@ async function inputSymbol(symbol) {
     } else {
         STSymbol = symbol;
     }
-    
+
     if (STSymbol == "") process.exit();
 
     STAddress = await securityTokenRegistry.methods.getSecurityTokenAddress(STSymbol).call({from: User});
@@ -175,8 +177,8 @@ async function investUsdTieredSTO(currency, amount) {
     if (typeof amount === 'undefined') {
         let investorInvestedUSD = web3.utils.fromWei(await currentSTO.methods.investorInvestedUSD(User).call({from: User}));
         let minimumInvestmentUSD = await currentSTO.methods.minimumInvestmentUSD().call({from: User});
-        let minimumInvestmentRaiseType = await currentSTO.methods.convertFromUSD(web3.utils.fromAscii(raiseType), minimumInvestmentUSD).call({from: User});      
-        cost = readlineSync.question(chalk.yellow(`Enter the amount of ${raiseType} you would like to invest or press 'Enter' to exit: `), {   
+        let minimumInvestmentRaiseType = await currentSTO.methods.convertFromUSD(web3.utils.fromAscii(raiseType), minimumInvestmentUSD).call({from: User});
+        cost = readlineSync.question(chalk.yellow(`Enter the amount of ${raiseType} you would like to invest or press 'Enter' to exit: `), {
             limit: function(input) {
                 return investorInvestedUSD != 0 || input > web3.utils.fromWei(minimumInvestmentRaiseType);
             },
@@ -239,7 +241,7 @@ async function investCappedSTO(currency, amount) {
 
     let costWei = web3.utils.toWei(cost.toString());
     if (displayRaiseType == 'POLY') {
-        let userBalance = await polyBalance(User); 
+        let userBalance = await polyBalance(User);
         if (parseInt(userBalance) >= parseInt(cost)) {
             let allowance = await polyToken.methods.allowance(STOAddress, User).call({from: User});
             if (allowance < costWei) {
@@ -304,7 +306,7 @@ async function showUserInfoForUSDTieredSTO()
     }
     let displayInvestorInvestedUSD = web3.utils.fromWei(await currentSTO.methods.investorInvestedUSD(User).call({from: User}));
     console.log(`    - Invested in USD:       ${displayInvestorInvestedUSD} USD`);
-    
+
     await generalTransferManager.methods.whitelist(User).call({from: User}, function(error, result){
         displayCanBuy = result.canBuyFromSTO;
     });
@@ -312,7 +314,7 @@ async function showUserInfoForUSDTieredSTO()
 
     let displayIsUserAccredited = await currentSTO.methods.accredited(User).call({from: User});
     console.log(`    - Accredited:            ${(displayIsUserAccredited)?"YES":"NO"}`)
-    
+
     if (!await currentSTO.methods.accredited(User).call({from: User})) {
         let displayNonAccreditedLimitUSD = web3.utils.fromWei(await currentSTO.methods.nonAccreditedLimitUSD().call({from: User}));
         let displayTokensRemainingAllocation = displayNonAccreditedLimitUSD - displayInvestorInvestedUSD;
@@ -347,7 +349,7 @@ async function showUSDTieredSTOInfo() {
         let displayMintedPerTierETH = "";
         if (ethRaise) {
           let mintedPerTierETH = await currentSTO.methods.mintedPerTierETH(t).call({from: Issuer});
-    
+
           displayMintedPerTierETH = `
         Sold for ETH:              ${web3.utils.fromWei(mintedPerTierETH)} ${displayTokenSymbol}`
         }
@@ -381,7 +383,7 @@ async function showUSDTieredSTOInfo() {
         Rate:                      ${web3.utils.fromWei(ratePerTier, 'ether')} USD per Token`
         + displayDiscountTokens;
     displayMintedPerTier = displayMintedPerTier + `
-    - Tokens minted in Tier ${t+1}:     ${web3.utils.fromWei(mintedPerTierTotal)} ${displayTokenSymbol}` 
+    - Tokens minted in Tier ${t+1}:     ${web3.utils.fromWei(mintedPerTierTotal)} ${displayTokenSymbol}`
     + displayMintedPerTierETH
     + displayMintedPerTierPOLY;}
 
@@ -393,7 +395,7 @@ async function showUSDTieredSTOInfo() {
         let fundsRaisedETH = web3.utils.fromWei(await currentSTO.methods.fundsRaisedETH().call({from: Issuer}));
         displayFundsRaisedETH = `
         ETH:                       ${fundsRaisedETH} ETH`;
-        
+
         //Only show sold for ETH if POLY raise is allowed too
         if (polyRaise) {
             let tokensSoldETH = web3.utils.fromWei(await currentSTO.methods.getTokensSoldForETH().call({from: Issuer}));
